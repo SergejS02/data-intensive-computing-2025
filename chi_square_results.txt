@@ -1,0 +1,8 @@
+token	category	observed	expected	chi_square	total_term	total_category
+abs	Health_and_Personal_Care	1	1	0	1	7
+additional	Health_and_Personal_Care	1	1	0	1	7
+allowing	Health_and_Personal_Care	1	1	0	1	7
+amazing	Health_and_Personal_Care	1	1	0	1	7
+appetite	Health_and_Personal_Care	1	1	0	1	7
+assorted	Health_and_Personal_Care	1	1	0	1	7
+average	Health_and_Personal_Care	1	1	0	1	7
