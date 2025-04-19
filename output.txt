@@ -1,0 +1,10 @@
+Beauty ^^:4.768
+Book >>>:2.502 >>>>>>>:2.502 >>allison:2.502 >>cedric:2.502 >baule:2.502 ^^bottom:2.502 ^all:2.502 ^the:0.451 ^^:0.416 >>:0.034
+CDs_and_Vinyl >haha:20.021 ^h:20.021 ^^:1.878
+Clothing_Shoes_and_Jewelry ^^:0.779
+Electronic ^>:9.073 >>:1.838
+Kindle_Store >reading:23.588 ^the:10.815
+Movies_and_TV ^^:1.277
+Musical_Instrument ^^:24.419
+Patio_Lawn_and_Garde >>:24.76
+>> >>> >>>>>>> >>allison >>cedric >baule >haha >reading ^> ^^ ^^bottom ^all ^h ^the
