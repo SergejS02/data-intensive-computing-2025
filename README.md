@@ -27,3 +27,13 @@ Produce a report.pdf, that contains detailed report including at least four sect
 3. Methodology and Approach
 4. Conclusions
 The Methodology and Approach section should have a figure illustrating your strategy and pipeline in one figure (1 page maximum) that shows the data flow clearly and indicate the chosen <key,value> design (all input, intermediary, and output pairs). The overall report should not exceed more than 8 pages (A4 size).
+
+
+*preprocessing.ipynb:*
+preprocesses input data.
+Output: chi_input.csv
+
+calculate_chi_square.py
+MapReduce algorithm that takes chi_input.csv as input to 
+compute the chi_square values for every token occuring in any review.
+Output: chi_square_results.txt
