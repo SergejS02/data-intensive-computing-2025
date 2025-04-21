@@ -37,3 +37,5 @@ calculate_chi_square.py
 MapReduce algorithm that takes chi_input.csv as input to 
 compute the chi_square values for every token occuring in any review.
 Output: chi_square_results.txt
+To run the file, write the following in the temrinal:
+python mapreduce_chi_square.py chi_input.csv --csv-header "reviewText_tokens,category"
