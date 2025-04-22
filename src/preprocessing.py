@@ -17,7 +17,7 @@ def tokenize_and_filter(text, stopwords):
     if pd.isna(text):
         return []
 
-    delimiter_chars = r'()\[\]{}.!?,;:+=\-_"\'`~#@&*%€$§<>^\\/'
+    delimiter_chars = r'()\[\]{}.!?,;:+=\-_"\'`~#@&*%€$§\\/'
     split_pattern = rf'[\s\d{re.escape(delimiter_chars)}]+'
 
     tokens = re.split(split_pattern, str(text).lower())

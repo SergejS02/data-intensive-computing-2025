@@ -31,9 +31,7 @@ def run_job(input_path):
     return pd.DataFrame(results)
 
 
-def save_outputs(df: pd.DataFrame):
-    df.to_csv('chi_square_results.txt', sep='\t', index=False, encoding='utf-8')
-    print(f"Full results saved to: chi_square_results.txt")
+def save_output(df: pd.DataFrame):
 
     top75 = (df.sort_values(['category', 'chi_square'], ascending=[True, False])
              .groupby('category').head(75))
@@ -52,17 +50,22 @@ def save_outputs(df: pd.DataFrame):
 
         print("Top 75 terms per category and merged dictionary written to output.txt")
 
+def save_output_full(df: pd.DataFrame):
+    df.to_csv('chi_square_results.txt', sep='\t', index=False, encoding='utf-8')
+    print(f"Full results saved to: chi_square_results.txt")
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--input_csv", help="Path to the input CSV file")
-    parser.add_argument("--save_full_results", action="store_true", help="Save output files if results are found")
+    parser.add_argument("--save_full_results", action="store_true")
 
     args = parser.parse_args()
 
     df = run_job(args.input_csv)
 
     if not df.empty:
+        save_output(df)
         if args.save_full_results:
-            save_outputs(df)
+            save_output_full(df)
     else:
         print("No results to process or save.")
