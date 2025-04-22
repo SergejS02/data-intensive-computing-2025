@@ -39,3 +39,14 @@ compute the chi_square values for every token occuring in any review.
 Output: chi_square_results.txt
 To run the file, write the following in the temrinal:
 python mapreduce_chi_square.py chi_input.csv --csv-header "reviewText_tokens,category"
+
+## How to run version in src
+1. 
+`python preprocessing.py --input "../Assignment_1_Assets/reviews_devset.json"`
+output file name and stopwords file are defined by default, but can be changed through args
+
+2. 
+when saving only the output.txt
+`python runner.py --input chi_input.csv`
+or saving the full results (calculate_chi_square.txt)
+`python runner.py --input chi_input.csv --save_full_result`
