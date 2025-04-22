@@ -1,10 +1,6 @@
 # data-intensive-computing-2025
-internal deadline: 21st
-
-# to do
 
 ### Preprocessing
-** Sergej by Sunday 13th**
 For preprocessing, make sure to perform the following steps:
 - Tokenization to unigrams, using whitespaces, tabs, digits, and the characters ()[]{}.!?,;:+=-_"'`~#@&*%€$§\/ as delimiters
 - Case folding
@@ -43,10 +39,12 @@ python mapreduce_chi_square.py chi_input.csv --csv-header "reviewText_tokens,cat
 ## How to run version in src
 1. 
 `python preprocessing.py --input "../Assignment_1_Assets/reviews_devset.json"`
+
 output file name and stopwords file are defined by default, but can be changed through args
 
 2. 
 when saving only the output.txt
 `python runner.py --input chi_input.csv`
+
 or saving the full results (calculate_chi_square.txt)
 `python runner.py --input chi_input.csv --save_full_result`
