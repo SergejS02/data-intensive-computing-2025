@@ -48,3 +48,6 @@ when saving only the output.txt
 
 or saving the full results (calculate_chi_square.txt)
 `python runner.py --input chi_input.csv --save_full_result`
+
+3. when running the preprocessing in hadoop using hadoop_preprocessing.py, following needs to be used as command
+`python Exercise_1/hadoop_preprocessing.py   -r hadoop   --hadoop-streaming-jar /usr/lib/hadoop/tools/lib/hadoop-streaming-3.3.6.jar   --stopwords hdfs:///user/e12427512/Exercise_1/stopwords.txt   hdfs:///user/dic25_shared/amazon-reviews/full/reviews_devset.json   --output-dir hdfs:///user/e12427512/hadoop_output`
