@@ -6,7 +6,12 @@ from mrjob.job import MRJob
 from mrjob.step import MRStep
 import logging
 
+from mrjob.protocol import RawValueProtocol
+
+
+
 class ChiSquareCalculator(MRJob):
+    OUTPUT_PROTOCOL = RawValueProtocol
     def configure_args(self):
         super().configure_args()
         self.add_file_arg('--stopwords')
