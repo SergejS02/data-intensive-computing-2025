@@ -1,17 +1,12 @@
 import sys
 import json
 import re
-import pandas as pd
 import ast
 from mrjob.job import MRJob
 from mrjob.step import MRStep
 import logging
-"""
-python combined.py ../Assignment_1_Assets/reviews_devset.json --stopwords ../Assignment_1_Assets/stopwords.txt
-"""
 
 class ChiSquareCalculator(MRJob):
-
     def configure_args(self):
         super().configure_args()
         self.add_file_arg('--stopwords')
@@ -19,7 +14,7 @@ class ChiSquareCalculator(MRJob):
     def load_stopwords(self):
         self.stopwords = set()
         if self.options.stopwords:
-            with open(self.options.stopwords) as f:
+            with open(self.options.stopwords, 'r') as f:
                 self.stopwords = set(line.strip() for line in f)
 
     def tokenize_and_filter(self, text, stopwords):
@@ -32,8 +27,8 @@ class ChiSquareCalculator(MRJob):
     def mapper_extract_terms(self, _, line):
         try:
             data = json.loads(line)
-
             category = data.get('category', '')
+
             yield ('!DOC_COUNT', category), 1
 
             try:
@@ -56,8 +51,6 @@ class ChiSquareCalculator(MRJob):
                         
         except (Exception, ValueError, SyntaxError) as e:
             self.stderr.write(f"ERROR processing line: {e}\n".encode('utf-8'))
-
-
 
     def combiner(self, key, counts):
         yield key, sum(counts)
@@ -103,6 +96,10 @@ class ChiSquareCalculator(MRJob):
                 self.to_compute.append((term, category, A))
 
         N = sum(self.doc_counts.values())
+
+        # Organize chi-square scores per category
+        category_terms = {}
+
         for term, category, A in self.to_compute:
             term_total = self.term_totals.get(term, 0)
             C = self.doc_counts.get(category, 0)
@@ -110,19 +107,31 @@ class ChiSquareCalculator(MRJob):
             D = N - C - B - A
 
             try:
-                chi = (N * (A * D - B * C) ** 2) / ((A + B) * (C + D) * (A + C) * (B + D))
+                chi_square = (N * (A * D - B * C) ** 2) / ((A + B) * (C + D) * (A + C) * (B + D))
             except ZeroDivisionError:
                 continue
 
-            expected = term_total * (C / N) if N else 0
+            if category not in category_terms:
+                category_terms[category] = []
+            category_terms[category].append((term, chi_square))
 
-            yield (term, category), {
-                'observed': A,
-                'expected': expected,
-                'chi_square': chi,
-                'total_term': term_total,
-                'total_category': C
-            }
+        # Now output per category: Top 75 terms sorted by chi-square
+        for category in sorted(category_terms.keys()):
+            sorted_terms = sorted(category_terms[category], key=lambda x: -x[1])[:75]
+            line = category + " " + ' '.join(
+                f"{term}:{round(chi_square, 3)}" for term, chi_square in sorted_terms
+            )
+            yield None, line
+
+        # Merged dictionary line (all tokens from all categories)
+        merged_tokens = set()
+        for term_chi_list in category_terms.values():
+            for term, _ in term_chi_list:
+                merged_tokens.add(term)
+
+        merged_tokens_sorted = sorted(merged_tokens)
+        merged_line = ' '.join(merged_tokens_sorted)
+        yield None, merged_line
 
     def steps(self):
         return [
@@ -143,44 +152,4 @@ class ChiSquareCalculator(MRJob):
         ]
 
 if __name__ == '__main__':
-    results = []
-    job = ChiSquareCalculator(args=sys.argv[1:])
-    with job.make_runner() as runner:
-        try:
-            runner.run()
-            
-            for (token, category), stats in job.parse_output(runner.cat_output()):
-                results.append({
-                    'token': token,
-                    'category': category,
-                    'observed': stats['observed'],
-                    'expected': stats['expected'],
-                    'chi_square': stats['chi_square'],
-                    'total_term': stats['total_term'],
-                    'total_category': stats['total_category']
-                })
-            
-        except Exception as e:
-            print(f"Error during job run: {e}")
-    
-    df = pd.DataFrame(results)
-    if not df.empty:
-        print("Processing results...")
-        top75 = (df.sort_values(['category', 'chi_square'], ascending=[True, False])
-                .groupby('category').head(75))
-
-        with open("output.txt", "w", encoding="utf-8") as f:
-            for category in sorted(top75['category'].unique()):
-                terms = top75[top75['category'] == category]
-                line = f"{category} " + ' '.join(
-                    f"{row['token']}:{round(row['chi_square'], 3)}"
-                    for _, row in terms.iterrows()
-                )
-                f.write(line.strip() + "\n")
-
-            merged = sorted(set(top75['token']))
-            f.write(" ".join(merged) + "\n")
-
-            print("Top 75 terms per category and merged dictionary written to output.txt")
-    else:
-        print("No results to process or save.")
+    ChiSquareCalculator.run()
