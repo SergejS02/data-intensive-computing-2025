@@ -7,17 +7,11 @@ from mrjob.job import MRJob
 from mrjob.step import MRStep
 import logging
 """
-python main.py ../Assignment_1_Assets/reviews_devset.json --stopwords ../Assignment_1_Assets/stopwords.txt
+python combined.py ../Assignment_1_Assets/reviews_devset.json --stopwords ../Assignment_1_Assets/stopwords.txt
 """
 
 class ChiSquareCalculator(MRJob):
 
-    logging.basicConfig(
-        filename="debug_mapper.log",
-        filemode="w",
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s"
-    )
     def configure_args(self):
         super().configure_args()
         self.add_file_arg('--stopwords')
@@ -29,7 +23,6 @@ class ChiSquareCalculator(MRJob):
                 self.stopwords = set(line.strip() for line in f)
 
     def tokenize_and_filter(self, text, stopwords):
-        logging.info(f"tokenizing text: {text}")
         delimiter_chars = r'()\[\]{}.!?,;:+=\-_"\'`~#@&*%€$§\\/'
         split_pattern = rf'[\s\d{re.escape(delimiter_chars)}]+'
         tokens = re.split(split_pattern, str(text).lower())
@@ -39,13 +32,19 @@ class ChiSquareCalculator(MRJob):
     def mapper_extract_terms(self, _, line):
         try:
             data = json.loads(line)
-            logging.info(f"passing in data: {data}")
-            tokens = self.tokenize_and_filter(
-                data.get('reviewText', '') + ' ' + data.get('summary', ''),
-                self.stopwords
-            )
+
             category = data.get('category', '')
             yield ('!DOC_COUNT', category), 1
+
+            try:
+                tokens = self.tokenize_and_filter(
+                    data.get('reviewText', '') + ' ' + data.get('summary', ''),
+                    self.stopwords
+                )
+            except Exception as e:
+                logging.error(f"Error inside tokenize_and_filter: {e}")
+                tokens = []
+
             seen = set()
             for raw in tokens:
                 if isinstance(raw, str):
@@ -54,6 +53,7 @@ class ChiSquareCalculator(MRJob):
                         seen.add(tok)
                         yield (category, tok), 1
                         yield ('*', tok), 1
+                        
         except (Exception, ValueError, SyntaxError) as e:
             self.stderr.write(f"ERROR processing line: {e}\n".encode('utf-8'))
 
@@ -127,9 +127,7 @@ class ChiSquareCalculator(MRJob):
     def steps(self):
         return [
             MRStep(
-                mapper_init=self.load_stopwords
-            ),
-            MRStep(
+                mapper_init=self.load_stopwords,
                 mapper=self.mapper_extract_terms,
                 combiner=self.combiner,
                 reducer=self.reducer_sum_counts
