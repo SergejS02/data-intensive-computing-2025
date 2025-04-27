@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import sys
-# ultra-fast JSON parsing if available
 try:
     import ujson as json
 except ImportError:
@@ -13,8 +12,7 @@ from mrjob.protocol import RawValueProtocol
 class ChiSquareCalculator(MRJob):
     OUTPUT_PROTOCOL = RawValueProtocol
 
-    # delimiters and digits map to spaces
-    _DELIMS = r'''()[]{}.!?,;:+=-_'"`~#@&*%€$§\\/0123456789'''
+    _DELIMS = r'''()[]{}.!?,;:+=-_"'`~#@&*%€§\\/0123456789'''
     TRANSLATOR = str.maketrans({c: ' ' for c in _DELIMS})
 
     def configure_args(self):
@@ -86,9 +84,12 @@ class ChiSquareCalculator(MRJob):
 
     def reducer_final(self, _, items):
         for (kind, ident), cnt in items:
-            if kind == '__DOC_COUNT__': self.doc_counts[ident] = cnt
-            elif kind == '__TERM_TOTAL__': self.term_totals[ident] = cnt
-            else: self.observations.append((kind, ident, cnt))
+            if kind == '__DOC_COUNT__':
+                self.doc_counts[ident] = cnt
+            elif kind == '__TERM_TOTAL__':
+                self.term_totals[ident] = cnt
+            else:
+                self.observations.append((kind, ident, cnt))
 
         N = sum(self.doc_counts.values()); buckets = {}
         for term, cat, A in self.observations:
@@ -99,27 +100,26 @@ class ChiSquareCalculator(MRJob):
             chi2 = N*(A*D - B*C)**2/denom
             buckets.setdefault(cat,[]).append((term,chi2))
 
+        merged_terms = set()
+
         for cat in sorted(buckets):
             top = sorted(buckets[cat], key=lambda x:-x[1])[:75]
+            merged_terms.update(t for t, _ in top)
             yield None, cat + ' ' + ' '.join(f"{t}:{v:.3f}" for t,v in top)
 
-        merged = sorted({t for lst in buckets.values() for t,_ in lst})
+        merged = sorted(merged_terms)
         yield None, ' '.join(merged)
 
     def steps(self):
         tune = {
-            # combine small files into ~128MB chunks
             'mapreduce.input.fileinputformat.split.maxsize':    '134217728',
             'mapreduce.input.fileinputformat.split.minsize':    '1048576',
-            # old-API CombineTextInputFormat
             'mapred.job.inputformat.class':                    'org.apache.hadoop.mapred.lib.CombineTextInputFormat',
-            # parallel reducers & compression
             'mapreduce.job.reduces':                           '5',
             'mapreduce.map.output.compress':                   'true',
             'mapreduce.map.output.compress.codec':             'org.apache.hadoop.io.compress.SnappyCodec',
             'mapreduce.output.fileoutputformat.compress':      'true',
             'mapreduce.output.fileoutputformat.compress.codec':'org.apache.hadoop.io.compress.SnappyCodec',
-            # JVM reuse and speculative
             'mapreduce.job.jvm.numtasks':                     '-1',
             'mapreduce.map.speculative':                      'true',
             'mapreduce.reduce.speculative':                   'true',
