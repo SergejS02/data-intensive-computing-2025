@@ -77,5 +77,5 @@ running locally
 
 running on hadoop:
     1. upload `stopwords.txt` and `chi_square_calculator.py` to cluster
-    2. `python combined.py  -r hadoop --hadoop-streaming-jar /usr/lib/hadoop/tools/lib/hadoop-streaming-3.3.6.jar --stopwords hdfs:///user/e12412694/Exercise_1/stopwords.txt hdfs:///user/dic25_shared/amazon-reviews/full/reviews_devset.json --output-dir hdfs:///user/e12412694/hadoop_output`
+    2. `python chi_square_calculator.py  -r hadoop --hadoop-streaming-jar /usr/lib/hadoop/tools/lib/hadoop-streaming-3.3.6.jar --stopwords hdfs:///user/e12412694/Exercise_1/stopwords.txt hdfs:///user/dic25_shared/amazon-reviews/full/reviewscombined.json --output-dir hdfs:///user/e12412694/hadoop_output`
     3. `hadoop fs -get /user/e12412694/hadoop_output/part-00000 output.txt`
