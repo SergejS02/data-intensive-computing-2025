@@ -1,0 +1,39 @@
+{
+    "FunctionName": "sentiment",
+    "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:sentiment",
+    "Runtime": "python3.11",
+    "Role": "arn:aws:iam::000000000000:role/lambda-role",
+    "Handler": "handler.handler",
+    "CodeSize": 477,
+    "Description": "",
+    "Timeout": 3,
+    "MemorySize": 128,
+    "LastModified": "2025-06-21T13:36:00.353193+0000",
+    "CodeSha256": "U7HMoXZy6Gp+eziHRwhGeg8o8z3ewzGJiSXNHTyn8AU=",
+    "Version": "$LATEST",
+    "TracingConfig": {
+        "Mode": "PassThrough"
+    },
+    "RevisionId": "c013c4d2-1695-4eb2-91b8-f0134e0e7091",
+    "State": "Pending",
+    "StateReason": "The function is being created.",
+    "StateReasonCode": "Creating",
+    "PackageType": "Zip",
+    "Architectures": [
+        "x86_64"
+    ],
+    "EphemeralStorage": {
+        "Size": 512
+    },
+    "SnapStart": {
+        "ApplyOn": "None",
+        "OptimizationStatus": "Off"
+    },
+    "RuntimeVersionConfig": {
+        "RuntimeVersionArn": "arn:aws:lambda:us-east-1::runtime:8eeff65f6809a3ce81507fe733fe09b835899b99481ba22fd75b5a7338290ec1"
+    },
+    "LoggingConfig": {
+        "LogFormat": "Text",
+        "LogGroup": "/aws/lambda/sentiment"
+    }
+}

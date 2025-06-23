@@ -1,0 +1,22 @@
+{
+    "UUID": "508e70d5-9f4c-4b83-84cf-b5e9bc64f562",
+    "StartingPosition": "LATEST",
+    "BatchSize": 100,
+    "MaximumBatchingWindowInSeconds": 0,
+    "ParallelizationFactor": 1,
+    "EventSourceArn": "arn:aws:dynamodb:us-east-1:000000000000:table/Reviews/stream/2025-06-22T17:43:32.247",
+    "FunctionArn": "arn:aws:lambda:us-east-1:000000000000:function:profanity",
+    "LastModified": "2025-06-22T19:44:30.124474+02:00",
+    "LastProcessingResult": "No records processed",
+    "State": "Deleting",
+    "StateTransitionReason": "User action",
+    "DestinationConfig": {
+        "OnFailure": {}
+    },
+    "MaximumRecordAgeInSeconds": -1,
+    "BisectBatchOnFunctionError": false,
+    "MaximumRetryAttempts": -1,
+    "TumblingWindowInSeconds": 0,
+    "FunctionResponseTypes": [],
+    "EventSourceMappingArn": "arn:aws:lambda:us-east-1:000000000000:event-source-mapping:508e70d5-9f4c-4b83-84cf-b5e9bc64f562"
+}

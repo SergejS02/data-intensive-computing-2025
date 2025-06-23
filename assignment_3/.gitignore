@@ -1,0 +1,50 @@
+# ─── Python ────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtualenvs
+.env/
+.venv/
+env/
+venv/
+
+# Pytest cache
+.pytest_cache/
+
+# Coverage
+.coverage
+htmlcov/
+coverage.xml
+
+# ─── Lambda build artifacts ───────────────────────────────────────────────
+# Ignore all vendored dependencies and corpora under each lambda
+src/lambdas/*/package/
+src/lambdas/*/nltk_data/
+# Ignore the generated deployment zips
+src/lambdas/*/lambda.zip
+
+# ─── AWS / LocalStack ─────────────────────────────────────────────────────
+aws/
+.localstack/
+localstack.log
+awscliv2.zip
+
+# ─── Dev‐set dumps or state files ───────────────────────────────────────────
+reviews_devset.json
+*.json
+
+# ─── IDEs & Editors ────────────────────────────────────────────────────────
+.vscode/
+.idea/
+
+# JetBrains
+*.iml
+out/
+
+# macOS / Windows system files
+.DS_Store
+Thumbs.db
+
+# ─── Misc ──────────────────────────────────────────────────────────────────
+*.log
