@@ -140,47 +140,34 @@ awslocal lambda add-permission \
 
 # 7) Stream → downstream (batch=1)
 for FN in profanity sentiment; do
-  UUIDS=$(awslocal lambda list-event-source-mappings --function-name "$FN" \
-    --query 'EventSourceMappings[].UUID' --output text)
-
-  if [[ -n "$UUIDS" && "$UUIDS" != "None" ]]; then
-    for uuid in $UUIDS; do
-      awslocal lambda delete-event-source-mapping --uuid "$uuid" 
-
-      for i in {1..5}; do
-        sleep 1
-        EXISTS=$(awslocal lambda list-event-source-mappings --function-name "$FN" \
-          --query "EventSourceMappings[?UUID=='$uuid']" --output json | jq length)
-        if [[ "$EXISTS" -eq 0 ]]; then
-          break
-        fi
-      done
-    done
-  fi
-
-  # Only sentiment and profanity should get stream mappings
-  if [[ "$FN" == "profanity" || "$FN" == "sentiment" ]]; then
-    awslocal lambda add-permission \
-      --function-name "$FN" \
-      --principal dynamodb.amazonaws.com \
-      --statement-id "ddb-trigger-$FN-$(uuidgen | cut -c1-8)" \
-      --action lambda:InvokeFunction \
-      >/dev/null 2>&1 || true
-
-    # Wait if stream is stuck deleting
-    while awslocal lambda list-event-source-mappings --function-name "$FN" \
-      --query "EventSourceMappings[?State=='Deleting']" --output text | grep -q .; do
-      echo "Waiting for $FN stream mappings to delete..."
-      sleep 2
-    done
-
-    awslocal lambda create-event-source-mapping \
-      --function-name "$FN" \
-      --event-source-arn "$STREAM_ARN" \
-      --starting-position LATEST \
-      --batch-size 1 \
-      >/dev/null
-  fi
+  awslocal lambda list-event-source-mappings --function-name "$FN" \
+    --query 'EventSourceMappings[].UUID' --output text \
+    | xargs -r -n1 awslocal lambda delete-event-source-mapping --uuid >/dev/null
+  awslocal lambda create-event-source-mapping \
+    --function-name "$FN" \
+    --event-source-arn "$STREAM_ARN" \
+    --starting-position LATEST \
+    --batch-size 1 >/dev/null
 done
 
-echo "Complete setup finished successfully."
+# 7) Start s3 watcher
+cat > /tmp/watch.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+BUCKET="reviews-input"; FUNC="preprocess"; SEEN="/tmp/seen.$$"; touch "$SEEN"
+while true; do
+  mapfile -t K < <(awslocal s3api list-objects-v2 --bucket "$BUCKET" --query "Contents[].Key" --output json | jq -r ".[]")
+  for key in "${K[@]}"; do
+    if ! grep -Fxq "$key" "$SEEN"; then
+      payload=$(awslocal s3api get-object --bucket "$BUCKET" --key "$key" /dev/stdout)
+      awslocal lambda invoke --function-name "$FUNC" --payload "$payload" /dev/stdout >/dev/null
+      echo "$key" >> "$SEEN"
+    fi
+  done
+  sleep 1
+done
+EOF
+chmod +x /tmp/watch.sh
+nohup /tmp/watch.sh >/dev/null 2>&1 &
+
+echo -e "\n🏁  Lambdas & watcher up – now run: pytest tests/ --sample 2\n"
