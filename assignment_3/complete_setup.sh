@@ -55,10 +55,13 @@ for TBL in "$REVIEWS_TABLE" "$USERS_TABLE"; do
       --projection-expression "$KEY_ATTR" \
       --query "Items[].${KEY_ATTR}.S" --output json)
   for id in "${ROWS[@]}"; do
+    id=$(echo "$id" | xargs)          # ← strip leading/trailing spaces
+    [[ -z "$id" ]] && continue        # ← skip empty lines
     awslocal dynamodb delete-item \
       --table-name "$TBL" \
       --key "{\"$KEY_ATTR\":{\"S\":\"$id\"}}" >/dev/null
   done
+
 done
 
 # stream NEW_IMAGE on Reviews
