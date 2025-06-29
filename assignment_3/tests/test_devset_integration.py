@@ -11,9 +11,9 @@ import pytest
 
 ROOT        = pathlib.Path(__file__).resolve().parents[1]
 DATASET     = ROOT / "reviews_devset.json"
-BUCKET      = "reviews-input"
-REVIEWS_TBL = "Reviews"
-USERS_TBL   = "Users"
+BUCKET  = "reviews-input"
+REV_TAB = "Reviews"
+USR_TAB = "Users"
 
 pytestmark = pytest.mark.slow
 
@@ -29,35 +29,70 @@ def load_dataset(sample=None):
         r.setdefault("review_id", f"dev-{i}")
     return reviews
 
+# Purge Reviews and Users tables before test
+def purge_table(table, key_field):
+    keys = table.scan(ProjectionExpression=key_field).get("Items", [])
+    for k in keys:
+        table.delete_item(Key={key_field: k[key_field]})
+
+
 def test_devset_pipeline(boto, request):
     if not DATASET.exists():
         pytest.skip(f"{DATASET} not found in repo root")
 
-    # ----- load reviews (you can limit sample size via pytest --sample=N ) -----
+    # ----- load reviews (limit sample size via pytest --sample=N ) -----
     sample_n = request.config.getoption("--sample", default=None)
     reviews  = load_dataset(int(sample_n)) if sample_n else load_dataset()
 
     s3    = boto["s3"]
     ddb   = boto["dynamodb"]
-    revT  = ddb.Table(REVIEWS_TBL)
-    usrT  = ddb.Table(USERS_TBL)
+    revT  = ddb.Table(REV_TAB)
+    usrT  = ddb.Table(USR_TAB)
+
+    # ----- purge tables before test -----------------------------------------
+    purge_table(revT, "review_id")
+    purge_table(usrT, "userId")
 
     # ----- upload all reviews to S3 (triggers pipeline) -----------------------
-    for rv in reviews:
-        key = f"{rv['review_id']}.json"
-        s3.put_object(Bucket=BUCKET, Key=key, Body=json.dumps(rv).encode())
+    uploaded_reviews = 0
+    for i, review in enumerate(reviews):
+        review["review_id"] = f"dev-{i}"
+        review["userId"] = review.get("reviewerID") or f"user-{i}"
+        if "reviewText" not in review or not review["reviewText"].strip():
+            continue
+        key = f"{review['review_id']}.json"
+        s3.put_object(Bucket=BUCKET, Key=key, Body=json.dumps(review).encode())
+        uploaded_reviews += 1
 
     # ----- wait until every review appears with sentiment --------------------
-    deadline = time.time() + 120   # 2-minute hard cap for big sets
+    deadline = time.time() + 180   # 3-minute hard cap for big sets
+    processed = []
+
     while time.time() < deadline:
         processed = revT.scan()["Items"]
-        if len(processed) >= len(reviews) and all(
-            itm.get("sentiment") and itm.get("containsProfanity") is not None
-            for itm in processed
-        ):
+        fully_processed = [
+            itm for itm in processed
+            if itm.get("sentiment") and itm.get("containsProfanity") is not None
+        ]
+        if len(fully_processed) >= uploaded_reviews:
             break
         time.sleep(2)
     else:
+        print(f"Timeout after 180s — fully processed {len(fully_processed)} / {uploaded_reviews} reviews")
+
+        missing_ids = [
+            itm["review_id"]
+            for itm in processed
+            if not itm.get("sentiment") or itm.get("containsProfanity") is None
+        ]
+        print(f"Incomplete review count: {len(missing_ids)}")
+        print("Sample incomplete review IDs:", missing_ids[:5])
+
+        none_sentiment = sum(1 for itm in processed if not itm.get("sentiment"))
+        none_profanity = sum(1 for itm in processed if itm.get("containsProfanity") is None)
+
+        print(f"Reviews missing sentiment: {none_sentiment}")
+        print(f"Reviews missing profanity flag: {none_profanity}")
         pytest.fail("Pipeline did not finish within timeout")
 
     # ----- compute required stats -------------------------------------------

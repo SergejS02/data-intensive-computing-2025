@@ -6,6 +6,7 @@ Helper  : preprocess(text) → list[str]  (imported by unit tests)
 """
 
 import os, json, uuid, re, boto3, nltk
+from decimal import Decimal
 from pathlib import Path
 from nltk.corpus import stopwords
 from nltk.stem   import WordNetLemmatizer
@@ -40,20 +41,18 @@ def handler(event, _ctx):
     Handle S3 trigger event. Download JSON from S3, parse it, preprocess it,
     and insert into the DynamoDB Reviews table.
     """
-    print("Received event:", json.dumps(event))
 
     for record in event.get("Records", []):
         s3_info = record.get("s3", {})
         bucket = s3_info["bucket"]["name"]
         key = s3_info["object"]["key"]
 
-        print(f"Fetching review from s3://{bucket}/{key}")
         obj = s3.get_object(Bucket=bucket, Key=key)
         body = obj['Body'].read()
         review = json.loads(body)
 
-        uid = review.get("userId") or review.get("reviewerID") or "unknown"
-        review_id = review.get("review_id") or str(uuid.uuid4())
+        uid = review.get("userId")
+        review_id = review.get("review_id")
         text = f"{review.get('summary','')} {review.get('reviewText','')}".strip()
         cleaned = preprocess(text)
 
@@ -61,7 +60,7 @@ def handler(event, _ctx):
         tbl.put_item(Item={
             "review_id":         review_id,
             "userId":            uid,
-            "overall":           review.get("overall"),
+            "overall":           Decimal(str(review["overall"])),
             "originalText":      review.get("reviewText",""),
             "cleanedText":       cleaned,
             "containsProfanity": None,
