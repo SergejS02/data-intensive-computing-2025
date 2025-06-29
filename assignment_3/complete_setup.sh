@@ -50,16 +50,20 @@ for TBL in "$REVIEWS_TABLE" "$USERS_TABLE"; do
       --billing-mode PAY_PER_REQUEST >/dev/null
 
   # purge rows so tests start with a clean table
+  # … earlier code unchanged …
+
+  # purge rows so tests start with a clean table
   mapfile -t ROWS < <(
-    awslocal dynamodb scan          --table-name "$TBL" \
+    awslocal dynamodb scan --table-name "$TBL" \
       --projection-expression "$KEY_ATTR" \
-      --query "Items[].${KEY_ATTR}.S" --output json)
+      --query "Items[].${KEY_ATTR}.S" --output text
+  )
   for id in "${ROWS[@]}"; do
-    id=$(echo "$id" | xargs)          # ← strip leading/trailing spaces
-    [[ -z "$id" ]] && continue        # ← skip empty lines
+    id=$(echo "$id" | xargs)            # ← trim whitespace
+    [[ -z "$id" ]] && continue          # ← skip empties
     awslocal dynamodb delete-item \
       --table-name "$TBL" \
-      --key "{\"$KEY_ATTR\":{\"S\":\"$id\"}}" >/dev/null
+      --key "{\"$KEY_ATTR\":{\"S\":\"$id\"}}" >/dev/null || true
   done
 
 done
