@@ -38,7 +38,7 @@ for T in "$REV_T" "$USR_T"; do
              --projection-expression $KEY --output json \
            | jq -r ".Items[].$KEY.S"); do
     awslocal dynamodb delete-item --table-name "$T" \
-      --key "{\"$KEY\":{S\":\"$K\"}}" >/dev/null
+      --key "{\"$KEY\":{\"S\":\"$K\"}}" >/dev/null
   done
 done
 
@@ -86,7 +86,7 @@ PY
 
   # absolute zip path
   ZIP="$ROOT/$SRC/lambda.zip"
-  mkdir -p "\$(dirname \"$ZIP\")"
+  mkdir -p "$(dirname "$ZIP")"
   ( cd "$BLD" && zip -qr "$ZIP" . )
 
   awslocal lambda get-function --function-name "$FN" >/dev/null 2>&1 \
@@ -102,40 +102,61 @@ PY
 
   awslocal lambda update-function-configuration \
     --function-name "$FN" \
-    --environment "Variables={ENDPOINT=http://localhost:4566,REVIEWS_TABLE=$REV_T,USERS_TABLE=$USR_T}" \
+    --environment "Variables={REVIEWS_TABLE=$REV_T,USERS_TABLE=$USR_T}" \
     >/dev/null
 done
+#ENDPOINT=http://localhost:4566,
 
-# 6) Stream → downstream (batch=1)
+# 6) Add S3 → Lambda trigger for "preprocess"
+awslocal lambda add-permission \
+  --function-name preprocess \
+  --statement-id s3invoke \
+  --action "lambda:InvokeFunction" \
+  --principal s3.amazonaws.com \
+  --source-arn arn:aws:s3:::$BUCKET \
+  >/dev/null 2>&1 || true
+
+# Ensure S3 triggers Lambda on new object upload
+awslocal s3api put-bucket-notification-configuration \
+  --bucket $BUCKET \
+  --notification-configuration "{
+    \"LambdaFunctionConfigurations\": [
+      {
+        \"LambdaFunctionArn\": \"arn:aws:lambda:us-east-1:000000000000:function:preprocess\",
+        \"Events\": [\"s3:ObjectCreated:*\"]
+      }
+    ]
+  }"
+
+# Create DynamoDB → profanity-check stream mapping
+awslocal lambda add-permission \
+  --function-name profanity \
+  --principal dynamodb.amazonaws.com \
+  --statement-id dynamodb-trigger-profanity \
+  --action lambda:InvokeFunction || true
+
+# 7) Stream → downstream (batch=1)
 for FN in profanity sentiment; do
-  awslocal lambda list-event-source-mappings --function-name "$FN" \
-    --query 'EventSourceMappings[].UUID' --output text \
-    | xargs -r -n1 awslocal lambda delete-event-source-mapping --uuid >/dev/null
+  UUIDS=$(awslocal lambda list-event-source-mappings --function-name "$FN" \
+    --query 'EventSourceMappings[].UUID' --output text)
+
+  if [[ -n "$UUIDS" && "$UUIDS" != "None" ]]; then
+    for uuid in $UUIDS; do
+      awslocal lambda delete-event-source-mapping --uuid "$uuid" 
+
+      for i in {1..5}; do
+        sleep 1
+        EXISTS=$(awslocal lambda list-event-source-mappings --function-name "$FN" \
+          --query "EventSourceMappings[?UUID=='$uuid']" --output json | jq length)
+        if [[ "$EXISTS" -eq 0 ]]; then
+          break
+        fi
+      done
+    done
+  fi
   awslocal lambda create-event-source-mapping \
     --function-name "$FN" \
     --event-source-arn "$STREAM_ARN" \
     --starting-position LATEST \
     --batch-size 1 >/dev/null
 done
-
-# 7) Start s3 watcher
-cat > /tmp/watch.sh <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-BUCKET="reviews-input"; FUNC="preprocess"; SEEN="/tmp/seen.$$"; touch "$SEEN"
-while true; do
-  mapfile -t K < <(awslocal s3api list-objects-v2 --bucket "$BUCKET" --query "Contents[].Key" --output json | jq -r ".[]")
-  for key in "${K[@]}"; do
-    if ! grep -Fxq "$key" "$SEEN"; then
-      payload=$(awslocal s3api get-object --bucket "$BUCKET" --key "$key" /dev/stdout)
-      awslocal lambda invoke --function-name "$FUNC" --payload "$payload" /dev/stdout >/dev/null
-      echo "$key" >> "$SEEN"
-    fi
-  done
-  sleep 1
-done
-EOF
-chmod +x /tmp/watch.sh
-nohup /tmp/watch.sh >/dev/null 2>&1 &
-
-echo -e "\n🏁  Lambdas & watcher up – now run: pytest tests/ --sample 2\n"

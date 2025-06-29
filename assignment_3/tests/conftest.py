@@ -4,7 +4,7 @@ import os, time, subprocess, json, pathlib, sys, uuid, random
 os.environ.setdefault("AWS_DEFAULT_REGION",        "us-east-1")
 os.environ.setdefault("AWS_ACCESS_KEY_ID",         "test")
 os.environ.setdefault("AWS_SECRET_ACCESS_KEY",     "test")
-os.environ.setdefault("AWS_ENDPOINT_URL",          "http://localhost:4566")
+#os.environ.setdefault("AWS_ENDPOINT_URL",          "http://localhost:4566")
 import pytest, boto3
 
 # ── make “src” importable ─────────────────────────────────────────────
@@ -27,7 +27,6 @@ def pytest_addoption(parser):
              "(omit the flag for full dataset).",
     )
 
-
 @pytest.fixture(scope="session")
 def boto():
     """Return a dict of boto3 clients/resources pre-wired to LocalStack."""
@@ -35,25 +34,3 @@ def boto():
         "s3"      : boto3.client("s3", **AWS_OPTS),
         "dynamodb": boto3.resource("dynamodb", **AWS_OPTS),
     }
-
-@pytest.fixture(scope="function")
-def rnd_review():
-    """Return a fresh review dict each time."""
-    uid = f"user{random.randint(1000, 9999)}"
-    return {
-        "review_id"  : str(uuid.uuid4()),
-        "userId"     : uid,
-        "reviewText" : "horrible trash product",
-        "summary"    : "awful",
-        "overall"    : 1,
-    }
-
-# ------------------------------------------------------------------  helpers
-def wait_for_item(table, key, timeout=30):
-    """Poll DynamoDB until the item exists or timeout (seconds)."""
-    for _ in range(timeout):
-        resp = table.get_item(Key=key)
-        if "Item" in resp:
-            return resp["Item"]
-        time.sleep(1)
-    raise TimeoutError("Item not found in DynamoDB within timeout")

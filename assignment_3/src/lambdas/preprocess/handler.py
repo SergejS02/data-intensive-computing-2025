@@ -11,12 +11,14 @@ from nltk.corpus import stopwords
 from nltk.stem   import WordNetLemmatizer
 
 # config via ENV
-ENDPOINT      = os.getenv("ENDPOINT", "http://localhost:4566")
+#ENDPOINT      = os.getenv("ENDPOINT", "http://localhost:4566")
 REVIEWS_TABLE = os.getenv("REVIEWS_TABLE", "Reviews")
 
 # AWS clients
-s3  = boto3.client("s3",      endpoint_url=ENDPOINT)
-ddb = boto3.resource("dynamodb", endpoint_url=ENDPOINT)
+#s3  = boto3.client("s3",      endpoint_url=ENDPOINT)
+#ddb = boto3.resource("dynamodb", endpoint_url=ENDPOINT)
+s3 = boto3.client("s3")
+ddb = boto3.resource("dynamodb")
 
 # NLTK data (bundled under src/lambdas/preprocess/nltk_data)
 NLTK_DIR = Path(__file__).parent / "nltk_data"
@@ -35,26 +37,37 @@ def preprocess(text: str) -> list[str]:
 
 def handler(event, _ctx):
     """
-    Expect a raw JSON review payload in event['body'] or encoded directly as event.
-    For our watcher, we send the JSON itself as the entire event.
+    Handle S3 trigger event. Download JSON from S3, parse it, preprocess it,
+    and insert into the DynamoDB Reviews table.
     """
-    review = event if isinstance(event, dict) else json.loads(event)
+    print("Received event:", json.dumps(event))
 
-    # fallback on reviewerID if userId missing
-    uid = review.get("userId") or review.get("reviewerID") or "unknown"
+    for record in event.get("Records", []):
+        s3_info = record.get("s3", {})
+        bucket = s3_info["bucket"]["name"]
+        key = s3_info["object"]["key"]
 
-    review_id = review.get("review_id") or str(uuid.uuid4())
-    text      = f"{review.get('summary','')} {review.get('reviewText','')}".strip()
-    cleaned   = preprocess(text)
+        print(f"Fetching review from s3://{bucket}/{key}")
+        obj = s3.get_object(Bucket=bucket, Key=key)
+        body = obj['Body'].read()
+        review = json.loads(body)
 
-    tbl = ddb.Table(REVIEWS_TABLE)
-    tbl.put_item(Item={
-        "review_id":         review_id,
-        "userId":            uid,
-        "overall":           review.get("overall"),
-        "originalText":      review.get("reviewText",""),
-        "cleanedText":       cleaned,
-        "containsProfanity": None,
-        "sentiment":         None,
-    })
-    return {"status":"PREPROCESSED","review_id":review_id}
+        uid = review.get("userId") or review.get("reviewerID") or "unknown"
+        review_id = review.get("review_id") or str(uuid.uuid4())
+        text = f"{review.get('summary','')} {review.get('reviewText','')}".strip()
+        cleaned = preprocess(text)
+
+        tbl = ddb.Table(REVIEWS_TABLE)
+        tbl.put_item(Item={
+            "review_id":         review_id,
+            "userId":            uid,
+            "overall":           review.get("overall"),
+            "originalText":      review.get("reviewText",""),
+            "cleanedText":       cleaned,
+            "containsProfanity": None,
+            "sentiment":         None,
+        })
+
+        print(f"Inserted review {review_id} for user {uid} into DynamoDB")
+
+    return {"status": "PREPROCESSED"}
