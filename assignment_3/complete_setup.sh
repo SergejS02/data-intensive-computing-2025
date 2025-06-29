@@ -1,116 +1,142 @@
 #!/usr/bin/env bash
-# build & deploy + start S3 watcher so pytest-integration just works
+# Build & (re)deploy the review-pipeline Lambdas to LocalStack
+# and wire all S3 / DynamoDB events.
 set -euo pipefail
 export AWS_PAGER=""
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
-# Lambda names, roles, etc.
-PY="python3.11"
-ROLE="arn:aws:iam::000000000000:role/lambda-role"
-FUNCS=(preprocess profanity sentiment)
-L_DIR="src/lambdas"
-TMP="/tmp/lambda_build.$$"
+# ── configuration ──────────────────────────────────────────────────────────
+PY_RUNTIME="python3.11"
+ROLE_ARN="arn:aws:iam::000000000000:role/lambda-role"
+FUNCTIONS=(preprocess profanity sentiment)
+LAMBDA_DIR="src/lambdas"
+TMP_BUILD="/tmp/lambda_build.$$"
 
-BUCKET="reviews-input"
-REV_T="Reviews"
-USR_T="Users"
+REVIEWS_BUCKET="reviews-input"
+REVIEWS_TABLE="Reviews"
+USERS_TABLE="Users"
+ENDPOINT_URL="http://localhost:4566"
 
-# 1) Ensure bucket
-awslocal s3api head-bucket --bucket "$BUCKET" 2>/dev/null \
-  || awslocal s3 mb "s3://$BUCKET" >/dev/null
-# purge
-awslocal s3 rm "s3://$BUCKET" --recursive >/dev/null 2>&1 || true
+# ── prerequisites ──────────────────────────────────────────────────────────
+command -v awslocal >/dev/null 2>&1 || { echo "❌  install awscli-local"; exit 1; }
+command -v jq      >/dev/null 2>&1 || { echo "❌  install jq";           exit 1; }
 
-# 2) Tables
-for T in "$REV_T" "$USR_T"; do
-  KEY="review_id"
-  [[ $T == "$USR_T" ]] && KEY="userId"
-  awslocal dynamodb describe-table --table-name "$T" >/dev/null 2>&1 || \
+echo "🔍  Checking LocalStack …"
+awslocal --version >/dev/null
+echo "✅  LocalStack is up."
+
+# ── S3 bucket (idempotent) ────────────────────────────────────────────────
+if ! awslocal s3api head-bucket --bucket "$REVIEWS_BUCKET" >/dev/null 2>&1; then
+  awslocal s3 mb "s3://$REVIEWS_BUCKET" >/dev/null
+fi
+echo "🧹  Emptying $REVIEWS_BUCKET …"
+awslocal s3 rm "s3://$REVIEWS_BUCKET" --recursive >/dev/null 2>&1 || true
+awslocal s3api put-bucket-notification-configuration \
+  --bucket "$REVIEWS_BUCKET" \
+  --notification-configuration '{}' >/dev/null      # clear old rules
+
+# ── DynamoDB tables ───────────────────────────────────────────────────────
+for TBL in "$REVIEWS_TABLE" "$USERS_TABLE"; do
+  KEY_ATTR=review_id
+  [[ $TBL == "$USERS_TABLE" ]] && KEY_ATTR=userId
+
+  awslocal dynamodb describe-table --table-name "$TBL" >/dev/null 2>&1 || \
     awslocal dynamodb create-table \
-      --table-name "$T" \
-      --attribute-definitions AttributeName=$KEY,AttributeType=S \
-      --key-schema AttributeName=$KEY,KeyType=HASH \
+      --table-name "$TBL" \
+      --attribute-definitions AttributeName=$KEY_ATTR,AttributeType=S \
+      --key-schema           AttributeName=$KEY_ATTR,KeyType=HASH \
       --billing-mode PAY_PER_REQUEST >/dev/null
-  # purge items
-  for K in $(awslocal dynamodb scan --table-name "$T" \
-             --projection-expression $KEY --output json \
-           | jq -r ".Items[].$KEY.S"); do
-    awslocal dynamodb delete-item --table-name "$T" \
-      --key "{\"$KEY\":{S\":\"$K\"}}" >/dev/null
+
+  # purge rows so tests start with a clean table
+  mapfile -t ROWS < <(
+    awslocal dynamodb scan          --table-name "$TBL" \
+      --projection-expression "$KEY_ATTR" \
+      --query "Items[].${KEY_ATTR}.S" --output json)
+  for id in "${ROWS[@]}"; do
+    awslocal dynamodb delete-item \
+      --table-name "$TBL" \
+      --key "{\"$KEY_ATTR\":{\"S\":\"$id\"}}" >/dev/null
   done
 done
 
-# 3) enable stream on Reviews
+# stream NEW_IMAGE on Reviews
 awslocal dynamodb update-table \
-  --table-name "$REV_T" \
-  --stream-specification StreamEnabled=true,StreamViewType=NEW_IMAGE \
-  >/dev/null 2>&1 || true
+  --table-name "$REVIEWS_TABLE" \
+  --stream-specification StreamEnabled=true,StreamViewType=NEW_IMAGE >/dev/null 2>&1 || true
+STREAM_ARN=$(awslocal dynamodb describe-table \
+  --table-name "$REVIEWS_TABLE" \
+  --query "Table.LatestStreamArn" --output text)
 
-STREAM_ARN=$(awslocal dynamodb describe-table --table-name "$REV_T" \
-              --query 'Table.LatestStreamArn' --output text)
+# ── minimal SSM parameters (tests need them) ──────────────────────────────
+awslocal ssm put-parameter --name "/dic2025/bucket/reviews" --type String --overwrite \
+  --value "$REVIEWS_BUCKET" >/dev/null
+awslocal ssm put-parameter --name "/dic2025/tables/reviews" --type String --overwrite \
+  --value "$REVIEWS_TABLE" >/dev/null
+awslocal ssm put-parameter --name "/dic2025/tables/users"   --type String --overwrite \
+  --value "$USERS_TABLE" >/dev/null
 
-# 4) SSM params
-awslocal ssm put-parameter --name "/dic2025/bucket/reviews" \
-  --type String --overwrite --value "$BUCKET"
-awslocal ssm put-parameter --name "/dic2025/tables/reviews" \
-  --type String --overwrite --value "$REV_T"
-awslocal ssm put-parameter --name "/dic2025/tables/users" \
-  --type String --overwrite --value "$USR_T"
+# ── build & (re)deploy every Lambda ───────────────────────────────────────
+rm -rf "$TMP_BUILD" && mkdir -p "$TMP_BUILD"
 
-# 5) Build & deploy Lambdas
-rm -rf "$TMP" && mkdir -p "$TMP"
-for FN in "${FUNCS[@]}"; do
-  SRC="$L_DIR/$FN"
-  BLD="$TMP/$FN"
+for FN in "${FUNCTIONS[@]}"; do
+  echo "🔧  Building $FN …"
+  SRC="$LAMBDA_DIR/$FN"
+  BLD="$TMP_BUILD/$FN"
   rm -rf "$BLD" && mkdir -p "$BLD"
-  cp "$SRC"/handler.py "$BLD"/
+  cp "$SRC/handler.py" "$BLD/"
 
-  case $FN in
-    preprocess)  pip install -q nltk regex       -t "$BLD" ;;
-    profanity)   pip install -q profanityfilter  -t "$BLD" ;;
-    sentiment)   pip install -q nltk             -t "$BLD" ;;
+  case "$FN" in
+    preprocess) pip install -q nltk regex       -t "$BLD" ;;
+    profanity)  pip install -q profanityfilter  -t "$BLD" ;;
+    sentiment)  pip install -q nltk             -t "$BLD" ;;
   esac
 
-  # bundle corpora
-  BUILD_DIR="$BLD" $PY - <<PY >/dev/null 2>&1
-import nltk, pathlib, os
+  # bundle the minimal NLTK bits we need
+  BUILD_DIR="$BLD" python3 - <<'PY' >/dev/null 2>&1
+import nltk, pathlib, os, sys, json
 d = pathlib.Path(os.environ["BUILD_DIR"]) / "nltk_data"
-d.mkdir(exist_ok=True, parents=True)
-if "$FN"=="preprocess":
-    for c in ("stopwords","wordnet"): nltk.download(c,quiet=True,download_dir=str(d))
+d.mkdir(parents=True, exist_ok=True)
+fn = pathlib.Path(os.environ["BUILD_DIR"]).parent.name
+if fn == "preprocess":
+    for c in ("stopwords", "wordnet"): nltk.download(c, quiet=True, download_dir=str(d))
 else:
-    nltk.download("vader_lexicon",quiet=True,download_dir=str(d))
+    nltk.download("vader_lexicon", quiet=True, download_dir=str(d))
 PY
 
-  # absolute zip path
   ZIP="$ROOT/$SRC/lambda.zip"
-  mkdir -p "\$(dirname \"$ZIP\")"
+  mkdir -p "$(dirname "$ZIP")"
   ( cd "$BLD" && zip -qr "$ZIP" . )
 
-  awslocal lambda get-function --function-name "$FN" >/dev/null 2>&1 \
-    && awslocal lambda update-function-code \
-         --function-name "$FN" --zip-file "fileb://$ZIP" >/dev/null \
-    || awslocal lambda create-function \
-         --function-name "$FN" \
-         --runtime "$PY" \
-         --handler handler.handler \
-         --zip-file "fileb://$ZIP" \
-         --role "$ROLE" \
-         --timeout 30 >/dev/null
+  if awslocal lambda get-function --function-name "$FN" >/dev/null 2>&1; then
+    awslocal lambda update-function-code \
+      --function-name "$FN" \
+      --zip-file "fileb://$ZIP" >/dev/null
+  else
+    awslocal lambda create-function \
+      --function-name "$FN" \
+      --runtime "$PY_RUNTIME" \
+      --handler handler.handler \
+      --zip-file "fileb://$ZIP" \
+      --role "$ROLE_ARN" \
+      --timeout 30 >/dev/null
+  fi
 
+  # inject runtime env-vars (single line – *no* None placeholders!)
   awslocal lambda update-function-configuration \
     --function-name "$FN" \
-    --environment "Variables={ENDPOINT=http://localhost:4566,REVIEWS_TABLE=$REV_T,USERS_TABLE=$USR_T}" \
+    --environment "Variables={ENDPOINT=$ENDPOINT_URL,REVIEWS_TABLE=$REVIEWS_TABLE,USERS_TABLE=$USERS_TABLE}" \
     >/dev/null
 done
 
-# 6) Stream → downstream (batch=1)
+# ── wire DynamoDB stream → profanity & sentiment ──────────────────────────
 for FN in profanity sentiment; do
+  # delete old mappings
   awslocal lambda list-event-source-mappings --function-name "$FN" \
-    --query 'EventSourceMappings[].UUID' --output text \
-    | xargs -r -n1 awslocal lambda delete-event-source-mapping --uuid >/dev/null
+    --query "EventSourceMappings[].UUID" --output text |
+  xargs -r -n1 awslocal lambda delete-event-source-mapping --uuid >/dev/null
+
   awslocal lambda create-event-source-mapping \
     --function-name "$FN" \
     --event-source-arn "$STREAM_ARN" \
@@ -118,24 +144,51 @@ for FN in profanity sentiment; do
     --batch-size 1 >/dev/null
 done
 
-# 7) Start s3 watcher
-cat > /tmp/watch.sh <<'EOF'
+# ── wire S3 → preprocess ──────────────────────────────────────────────────
+PRE_ARN=$(awslocal lambda get-function \
+  --function-name preprocess \
+  --query "Configuration.FunctionArn" --output text)
+
+awslocal s3api put-bucket-notification-configuration \
+  --bucket "$REVIEWS_BUCKET" \
+  --notification-configuration \
+  "{\"LambdaFunctionConfigurations\":[{\"LambdaFunctionArn\":\"$PRE_ARN\",\"Events\":[\"s3:ObjectCreated:*\"]}]}" \
+  >/dev/null
+
+awslocal lambda remove-permission --function-name preprocess --statement-id S3Invoke \
+  >/dev/null 2>&1 || true
+awslocal lambda add-permission \
+  --function-name preprocess \
+  --statement-id S3Invoke \
+  --action lambda:InvokeFunction \
+  --principal s3.amazonaws.com \
+  --source-arn "arn:aws:s3:::${REVIEWS_BUCKET}" >/dev/null
+
+# ── tiny watchdog: synthesise S3 events if LocalStack ever drops them ─────
+cat > /tmp/watch_s3.sh <<'EOSH'
 #!/usr/bin/env bash
 set -euo pipefail
-BUCKET="reviews-input"; FUNC="preprocess"; SEEN="/tmp/seen.$$"; touch "$SEEN"
+BUCKET="reviews-input"; FUNC="preprocess"
+SEEN="/tmp/seen.$$"; touch "$SEEN"
 while true; do
-  mapfile -t K < <(awslocal s3api list-objects-v2 --bucket "$BUCKET" --query "Contents[].Key" --output json | jq -r ".[]")
-  for key in "${K[@]}"; do
-    if ! grep -Fxq "$key" "$SEEN"; then
-      payload=$(awslocal s3api get-object --bucket "$BUCKET" --key "$key" /dev/stdout)
-      awslocal lambda invoke --function-name "$FUNC" --payload "$payload" /dev/stdout >/dev/null
-      echo "$key" >> "$SEEN"
-    fi
+  mapfile -t KEYS < <(
+    awslocal s3api list-objects-v2 --bucket "$BUCKET" \
+      --query 'Contents[].Key' --output json | jq -r '.[]')
+  for k in "${KEYS[@]}"; do
+    grep -Fxq "$k" "$SEEN" && continue
+    PAYLOAD=$(cat <<JSON
+{ "Records": [ { "s3": { "bucket": { "name": "$BUCKET" },
+                          "object": { "key": "$k" } } } ] }
+JSON
+)
+    awslocal lambda invoke --function-name "$FUNC" --payload "$PAYLOAD" /dev/stdout >/dev/null
+    echo "$k" >> "$SEEN"
   done
-  sleep 1
+  sleep 0.5
 done
-EOF
-chmod +x /tmp/watch.sh
-nohup /tmp/watch.sh >/dev/null 2>&1 &
+EOSH
 
-echo -e "\n🏁  Lambdas & watcher up – now run: pytest tests/ --sample 2\n"
+chmod +x /tmp/watch_s3.sh
+nohup /tmp/watch_s3.sh >/dev/null 2>&1 &
+
+echo -e "\n🏁  Deployment complete – run:  pytest tests/\n"

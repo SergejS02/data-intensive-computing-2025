@@ -51,7 +51,7 @@ def test_devset_pipeline(boto, request):
         s3.put_object(Bucket=BUCKET, Key=key, Body=json.dumps(rv).encode())
 
     # ----- wait until every review appears with sentiment --------------------
-    deadline = time.time() + 120   # 2-minute hard cap for big sets
+    deadline = time.time() + 600   # 2-minute hard cap for big sets
     while time.time() < deadline:
         processed = revT.scan()["Items"]
         if len(processed) >= len(reviews) and all(

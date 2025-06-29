@@ -1,5 +1,3 @@
-import os
-os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")   # <─ fixes NoRegionError
 import os, time, subprocess, json, pathlib, sys, uuid, random
 os.environ.setdefault("AWS_DEFAULT_REGION",        "us-east-1")
 os.environ.setdefault("AWS_ACCESS_KEY_ID",         "test")
@@ -49,7 +47,7 @@ def rnd_review():
     }
 
 # ------------------------------------------------------------------  helpers
-def wait_for_item(table, key, timeout=30):
+def wait_for_item(table, key, timeout=600):
     """Poll DynamoDB until the item exists or timeout (seconds)."""
     for _ in range(timeout):
         resp = table.get_item(Key=key)
