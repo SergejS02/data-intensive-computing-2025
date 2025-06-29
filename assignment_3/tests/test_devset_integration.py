@@ -8,7 +8,6 @@ Mark the test 'slow' so you can skip it with `pytest -m "not slow"`
 """
 import json, time, pathlib, random
 import pytest
-from conftest import wait_for_item
 
 ROOT        = pathlib.Path(__file__).resolve().parents[1]
 DATASET     = ROOT / "reviews_devset.json"
@@ -29,8 +28,6 @@ def load_dataset(sample=None):
     for i, r in enumerate(reviews):
         r.setdefault("review_id", f"dev-{i}")
     return reviews
-
-
 
 def test_devset_pipeline(boto, request):
     if not DATASET.exists():

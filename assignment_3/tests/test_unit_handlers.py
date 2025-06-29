@@ -6,16 +6,15 @@ from lambdas.sentiment.handler  import sid
 def test_preprocess_basic():
     txt = "This Product, IS absolutely Terrible!!"
     cleaned = _pre(txt)
-    assert "terrible" in cleaned and "product" in cleaned
-    assert "is" not in cleaned                      # stop-word removed
+    assert "terrible" in cleaned
+    assert "product" in cleaned
+    assert "is" not in cleaned  # stopword removed
 
 def test_profanity_filter():
-    bad  = "shit happens"
-    good = "flowers are nice"
-    assert pf.is_profane(bad)  is True
-    assert pf.is_profane(good) is False
+    assert pf.is_profane("shit happens") is True
+    assert pf.is_profane("flowers are nice") is False
+    assert pf.is_profane("this is bad") is False  # edge case
 
 def test_sentiment_scoring():
-    pos = sid.polarity_scores("I love it")["compound"]
-    neg = sid.polarity_scores("I hate it")["compound"]
-    assert pos > 0.25 and neg < -0.25
+    assert sid.polarity_scores("I love it")["compound"] > 0.25
+    assert sid.polarity_scores("I hate it")["compound"] < -0.25
