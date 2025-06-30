@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Build & (re)deploy the review-pipeline Lambdas to LocalStack
-# and wire all S3 / DynamoDB events.
+#build and deploy the review-pipeline Lambdas to LocalStack
+#connect lambdas and db
 set -euo pipefail
 export AWS_PAGER=""
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
-# ── configuration ──────────────────────────────────────────────────────────
+#config
 PY_RUNTIME="python3.11"
 ROLE_ARN="arn:aws:iam::000000000000:role/lambda-role"
 FUNCTIONS=(preprocess profanity sentiment)
@@ -19,25 +19,25 @@ REVIEWS_TABLE="Reviews"
 USERS_TABLE="Users"
 ENDPOINT_URL="http://localhost:4566"
 
-# ── prerequisites ──────────────────────────────────────────────────────────
-command -v awslocal >/dev/null 2>&1 || { echo "❌  install awscli-local"; exit 1; }
-command -v jq      >/dev/null 2>&1 || { echo "❌  install jq";           exit 1; }
+#checkup
+command -v awslocal >/dev/null 2>&1 || { echo "install awscli-local"; exit 1; }
+command -v jq      >/dev/null 2>&1 || { echo "install jq";           exit 1; }
 
-echo "🔍  Checking LocalStack …"
+echo "Checking LocalStack ..."
 awslocal --version >/dev/null
-echo "✅  LocalStack is up."
+echo "LocalStack is up."
 
-# ── S3 bucket (idempotent) ────────────────────────────────────────────────
+#S3
 if ! awslocal s3api head-bucket --bucket "$REVIEWS_BUCKET" >/dev/null 2>&1; then
   awslocal s3 mb "s3://$REVIEWS_BUCKET" >/dev/null
 fi
-echo "🧹  Emptying $REVIEWS_BUCKET …"
+echo "Emptying $REVIEWS_BUCKET ..."
 awslocal s3 rm "s3://$REVIEWS_BUCKET" --recursive >/dev/null 2>&1 || true
 awslocal s3api put-bucket-notification-configuration \
   --bucket "$REVIEWS_BUCKET" \
   --notification-configuration '{}' >/dev/null      # clear old rules
 
-# ── DynamoDB tables ───────────────────────────────────────────────────────
+#db tables init
 for TBL in "$REVIEWS_TABLE" "$USERS_TABLE"; do
   KEY_ATTR=review_id
   [[ $TBL == "$USERS_TABLE" ]] && KEY_ATTR=userId
@@ -49,18 +49,15 @@ for TBL in "$REVIEWS_TABLE" "$USERS_TABLE"; do
       --key-schema           AttributeName=$KEY_ATTR,KeyType=HASH \
       --billing-mode PAY_PER_REQUEST >/dev/null
 
-  # purge rows so tests start with a clean table
-  # … earlier code unchanged …
-
-  # purge rows so tests start with a clean table
+  # delete rows so tests start with a clean table
   mapfile -t ROWS < <(
     awslocal dynamodb scan --table-name "$TBL" \
       --projection-expression "$KEY_ATTR" \
       --query "Items[].${KEY_ATTR}.S" --output text
   )
   for id in "${ROWS[@]}"; do
-    id=$(echo "$id" | xargs)            # ← trim whitespace
-    [[ -z "$id" ]] && continue          # ← skip empties
+    id=$(echo "$id" | xargs)           
+    [[ -z "$id" ]] && continue         
     awslocal dynamodb delete-item \
       --table-name "$TBL" \
       --key "{\"$KEY_ATTR\":{\"S\":\"$id\"}}" >/dev/null || true
@@ -68,7 +65,6 @@ for TBL in "$REVIEWS_TABLE" "$USERS_TABLE"; do
 
 done
 
-# stream NEW_IMAGE on Reviews
 awslocal dynamodb update-table \
   --table-name "$REVIEWS_TABLE" \
   --stream-specification StreamEnabled=true,StreamViewType=NEW_IMAGE >/dev/null 2>&1 || true
@@ -76,7 +72,7 @@ STREAM_ARN=$(awslocal dynamodb describe-table \
   --table-name "$REVIEWS_TABLE" \
   --query "Table.LatestStreamArn" --output text)
 
-# ── minimal SSM parameters (tests need them) ──────────────────────────────
+#ssm param (minimum)
 awslocal ssm put-parameter --name "/dic2025/bucket/reviews" --type String --overwrite \
   --value "$REVIEWS_BUCKET" >/dev/null
 awslocal ssm put-parameter --name "/dic2025/tables/reviews" --type String --overwrite \
@@ -84,11 +80,11 @@ awslocal ssm put-parameter --name "/dic2025/tables/reviews" --type String --over
 awslocal ssm put-parameter --name "/dic2025/tables/users"   --type String --overwrite \
   --value "$USERS_TABLE" >/dev/null
 
-# ── build & (re)deploy every Lambda ───────────────────────────────────────
+#build and delpoy
 rm -rf "$TMP_BUILD" && mkdir -p "$TMP_BUILD"
 
 for FN in "${FUNCTIONS[@]}"; do
-  echo "🔧  Building $FN …"
+  echo "Building $FN ..."
   SRC="$LAMBDA_DIR/$FN"
   BLD="$TMP_BUILD/$FN"
   rm -rf "$BLD" && mkdir -p "$BLD"
@@ -100,7 +96,7 @@ for FN in "${FUNCTIONS[@]}"; do
     sentiment)  pip install -q nltk             -t "$BLD" ;;
   esac
 
-  # bundle the minimal NLTK bits we need
+  #bundle the minimal NLTK bits needed
   BUILD_DIR="$BLD" python3 - <<'PY' >/dev/null 2>&1
 import nltk, pathlib, os, sys, json
 d = pathlib.Path(os.environ["BUILD_DIR"]) / "nltk_data"
@@ -130,14 +126,14 @@ PY
       --timeout 30 >/dev/null
   fi
 
-  # inject runtime env-vars (single line – *no* None placeholders!)
+  # inject runtime environment vars
   awslocal lambda update-function-configuration \
     --function-name "$FN" \
     --environment "Variables={ENDPOINT=$ENDPOINT_URL,REVIEWS_TABLE=$REVIEWS_TABLE,USERS_TABLE=$USERS_TABLE}" \
     >/dev/null
 done
 
-# ── wire DynamoDB stream → profanity & sentiment ──────────────────────────
+#init db and stream to profanity and sentiment
 for FN in profanity sentiment; do
   # delete old mappings
   awslocal lambda list-event-source-mappings --function-name "$FN" \
@@ -151,7 +147,7 @@ for FN in profanity sentiment; do
     --batch-size 1 >/dev/null
 done
 
-# ── wire S3 → preprocess ──────────────────────────────────────────────────
+#start s3 and preprocess
 PRE_ARN=$(awslocal lambda get-function \
   --function-name preprocess \
   --query "Configuration.FunctionArn" --output text)
@@ -171,7 +167,7 @@ awslocal lambda add-permission \
   --principal s3.amazonaws.com \
   --source-arn "arn:aws:s3:::${REVIEWS_BUCKET}" >/dev/null
 
-# ── tiny watchdog: synthesise S3 events if LocalStack ever drops them ─────
+#watchdog
 cat > /tmp/watch_s3.sh <<'EOSH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -198,4 +194,4 @@ EOSH
 chmod +x /tmp/watch_s3.sh
 nohup /tmp/watch_s3.sh >/dev/null 2>&1 &
 
-echo -e "\n🏁  Deployment complete – run:  pytest tests/\n"
+echo -e "\n complete now run:  pytest tests/\n"

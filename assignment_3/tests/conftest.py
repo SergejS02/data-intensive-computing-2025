@@ -5,17 +5,16 @@ os.environ.setdefault("AWS_SECRET_ACCESS_KEY",     "test")
 os.environ.setdefault("AWS_ENDPOINT_URL",          "http://localhost:4566")
 import pytest, boto3
 
-# ── make “src” importable ─────────────────────────────────────────────
-ROOT = pathlib.Path(__file__).resolve().parents[1]   # …/assignment_3
+#src importable
+ROOT = pathlib.Path(__file__).resolve().parents[1]  
 SRC  = ROOT / "src"
-sys.path.insert(0, str(SRC))                         # ← key line
-# ──────────────────────────────────────────────────────────────────────
+sys.path.insert(0, str(SRC))                        
 
-# ------------------------------------------------------------------  AWS
+#aws connection 
 ENDPOINT = os.getenv("AWS_ENDPOINT", "http://localhost:4566")
 AWS_OPTS = dict(endpoint_url=ENDPOINT, region_name="us-east-1")
 
-# ------------------------------------------------------------------  custom CLI option
+#CLI option
 def pytest_addoption(parser):
     parser.addoption(
         "--sample",
@@ -46,7 +45,7 @@ def rnd_review():
         "overall"    : 1,
     }
 
-# ------------------------------------------------------------------  helpers
+
 def wait_for_item(table, key, timeout=600):
     """Poll DynamoDB until the item exists or timeout (seconds)."""
     for _ in range(timeout):

@@ -1,11 +1,3 @@
-"""
-Integration test that streams the entire reviews_devset.json file
-through the serverless pipeline.  It then verifies that:
-  • all reviews ended up in the Reviews table
-  • each review has sentiment & profanity filled
-  • summary statistics are produced (printed) for manual inspection
-Mark the test 'slow' so you can skip it with `pytest -m "not slow"`
-"""
 import json, time, pathlib, random
 import pytest
 from conftest import wait_for_item
@@ -19,7 +11,7 @@ USERS_TBL   = "Users"
 pytestmark = pytest.mark.slow
 
 def load_dataset(sample=None):
-    """Read reviews_devset.json (JSON-Lines)."""
+    """Read reviews_devset.json."""
     reviews = []
     with DATASET.open("r", encoding="utf-8") as fh:
         for line in fh:
@@ -36,7 +28,7 @@ def test_devset_pipeline(boto, request):
     if not DATASET.exists():
         pytest.skip(f"{DATASET} not found in repo root")
 
-    # ----- load reviews (you can limit sample size via pytest --sample=N ) -----
+    #load reviews and limit with for example --sample=10
     sample_n = request.config.getoption("--sample", default=None)
     reviews  = load_dataset(int(sample_n)) if sample_n else load_dataset()
 
@@ -45,13 +37,13 @@ def test_devset_pipeline(boto, request):
     revT  = ddb.Table(REVIEWS_TBL)
     usrT  = ddb.Table(USERS_TBL)
 
-    # ----- upload all reviews to S3 (triggers pipeline) -----------------------
+    #upload
     for rv in reviews:
         key = f"{rv['review_id']}.json"
         s3.put_object(Bucket=BUCKET, Key=key, Body=json.dumps(rv).encode())
 
-    # ----- wait until every review appears with sentiment --------------------
-    deadline = time.time() + 600   # 2-minute hard cap for big sets
+    #wait until uploadded
+    deadline = time.time() + 600   
     while time.time() < deadline:
         processed = revT.scan()["Items"]
         if len(processed) >= len(reviews) and all(
@@ -63,7 +55,7 @@ def test_devset_pipeline(boto, request):
     else:
         pytest.fail("Pipeline did not finish within timeout")
 
-    # ----- compute required stats -------------------------------------------
+    #stats
     counts = {"positive": 0, "neutral": 0, "negative": 0}
     profane = 0
     for itm in processed:
@@ -75,13 +67,11 @@ def test_devset_pipeline(boto, request):
         u["userId"] for u in usrT.scan()["Items"] if u.get("banned")
     ]
 
-    # ----- sanity asserts ----------------------------------------------------
     assert sum(counts.values()) == len(reviews)
-    # at least one review should fall into *some* category
+    # at least one review should fall into a certgain category
     assert any(v > 0 for v in counts.values())
 
-    # ----- print a concise summary for the grader ---------------------------
-    print("\n\n=== DEV-SET SUMMARY ===")
+    print("\n\nDEV-SET SUMMARY")
     print(f"Total reviews          : {len(reviews)}")
     print(f"Positive / Neutral / Negative : {counts['positive']} / "
           f"{counts['neutral']} / {counts['negative']}")

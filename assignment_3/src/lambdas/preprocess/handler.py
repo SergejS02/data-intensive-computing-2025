@@ -1,15 +1,4 @@
-"""
-Lambda #1 – preprocess review uploads (S3 → Reviews).
-
-Adds to each review row:
-  • cleanedText   (JSON-encoded token list)
-  • containsProfanity
-  • sentiment
-
-No strike-counter logic here – that now lives in lambdas/profanity.
-"""
 from __future__ import annotations
-
 import json
 import os
 import re
@@ -17,7 +6,6 @@ import uuid
 from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlparse
-
 import boto3
 import botocore.exceptions
 import nltk
@@ -25,7 +13,7 @@ from botocore.config import Config
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 
-# ── AWS helpers ──────────────────────────────────────────────────────────
+#aws helpers for the connection to localstack
 def _ls_endpoint(port: int = 4566) -> str:
     ep = os.getenv("ENDPOINT")
     if ep:
@@ -42,7 +30,7 @@ s3 = boto3.client("s3", **aws_cfg, config=Config(s3={"addressing_style": "path"}
 ddb = boto3.resource("dynamodb", **aws_cfg)
 reviews_tbl = ddb.Table(os.getenv("REVIEWS_TABLE", "Reviews"))
 
-# ── tiny NLP stack ───────────────────────────────────────────────────────
+#preflagging
 NLTK_DIR = Path(__file__).parent / "nltk_data"
 nltk.data.path.insert(0, str(NLTK_DIR))
 
@@ -50,17 +38,17 @@ _TOKEN = re.compile(r"[A-Za-z]+")
 try:
     _STOP = set(stopwords.words("english"))
     _LEM = WordNetLemmatizer()
-except LookupError:                      # fallback – keeps the Lambda tiny
+except LookupError:                     
     _STOP = {"a", "an", "the", "is", "are", "this", "that", "in", "of"}
 
     class _Dummy:
-        def lemmatize(self, w):  # noqa: D401
+        def lemmatize(self, w):  
             return w
     _LEM = _Dummy()
 
 
 def preprocess(text: str) -> list[str]:
-    """Tokenise, stop-word filter, lemmatise (exported for unit tests)."""
+    """Tokenise, stop-word filter, lemmatise."""
     return [
         _LEM.lemmatize(tok)
         for tok in _TOKEN.findall(text.lower())
@@ -77,7 +65,7 @@ try:
         c = _sid.polarity_scores(t)["compound"]
         return "positive" if c > 0.05 else "negative" if c < -0.05 else "neutral"
 
-except LookupError:  # tiny heuristic if VADER isn’t bundled
+except LookupError:  #preflagging
     _POS = {"great", "good", "excellent", "awesome", "fantastic", "love"}
     _NEG = {"bad", "awful", "terrible", "horrible", "worst", "hate", "trash"}
 
@@ -96,15 +84,15 @@ def is_profane(text: str) -> bool:
     return any(w in _BAD for w in _TOKEN.findall(text.lower()))
 
 
-# ── Lambda handler ───────────────────────────────────────────────────────
+#handler logic 
 def handler(event, _ctx):
     # exactly one S3 record per invocation
     s3rec = event["Records"][0]["s3"]
     bucket, key = s3rec["bucket"]["name"], s3rec["object"]["key"]
 
     rv = json.loads(s3.get_object(Bucket=bucket, Key=key)["Body"].read())
-    rid = rv.get("review_id") or str(uuid.uuid4())
-    uid = rv.get("userId") or rv.get("reviewerID") or "anon"
+    rid = str(uuid.uuid4())
+    uid = rv.get("reviewerID") or "anon"
 
     raw_txt = f"{rv.get('summary', '')} {rv.get('reviewText', '')}".strip()
     tokens = preprocess(raw_txt)
