@@ -53,5 +53,5 @@ def wait_for_item(table, key, timeout=600):
         resp = table.get_item(Key=key)
         if "Item" in resp:
             return resp["Item"]
-        time.sleep(1)
+        time.sleep(0.1)
     raise TimeoutError("Item not found in DynamoDB within timeout")
